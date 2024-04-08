@@ -23,10 +23,11 @@ import (
 )
 
 var (
-	registeredUsers  *mongo.Collection
-	courseCollection *mongo.Collection
-	ctx              = context.TODO()
-	jwtKey           = []byte("3J&59#sM%5D+^!Y$BXu@2pPw@sn#ZjF")
+	registeredUsers   *mongo.Collection
+	courseCollection  *mongo.Collection
+	ctx               = context.TODO()
+	jwtKey            = []byte("3J&59#sM%5D+^!Y$BXu@2pPw@sn#ZjF")
+	adminSecurityCode string
 )
 
 // Claims structure for JWT token
@@ -37,12 +38,13 @@ type Claims struct {
 }
 
 type UserRegistration struct {
-	Username   string   `json:"username" binding:"required"`
-	Password   string   `json:"password" binding:"required"`
-	Role       string   `json:"role" binding:"required"`
-	IsVerified bool     `json:"isVerified"`
-	OTP        string   `json:"otp"`
-	Courses    []string `json:"courses,omitempty"`
+	Username     string   `json:"username" binding:"required"`
+	Password     string   `json:"password" binding:"required"`
+	Role         string   `json:"role" binding:"required"`
+	IsVerified   bool     `json:"isVerified"`
+	OTP          string   `json:"otp"`
+	Courses      []string `json:"courses,omitempty"`
+	SecurityCode string   `json:"securityCode"`
 }
 
 type Course struct {
@@ -54,6 +56,8 @@ func main() {
 	if err != nil {
 		log.Fatal("Error loading .env file")
 	}
+
+	adminSecurityCode = os.Getenv("SECURITY_CODE")
 
 	client, err := mongo.NewClient(options.Client().ApplyURI(os.Getenv("MONGO_URI")))
 	if err != nil {
@@ -103,6 +107,12 @@ func register(c *gin.Context) {
 	}
 	if count > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Username already exists"})
+		return
+	}
+
+	// Check if the user is registering as an admin with the correct security code
+	if user.Role == "admin" && user.SecurityCode != adminSecurityCode {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Incorrect security code for admin registration"})
 		return
 	}
 
