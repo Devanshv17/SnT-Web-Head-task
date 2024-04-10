@@ -14,7 +14,7 @@
    Or directly add environment variables in `.env` with the following details:
 
     ```plaintext
-    MONGO_URI=mongodb+srv://your_username:your_password@cluster0.adahnkt.mongodb.net/?retryWrites=true&w=majority
+    MONGO_URI=<"your Mongo URL">
     SMTP_USERNAME=your_smtp_username
     SMTP_PASSWORD=your_smtp_password
     SECURITY_CODE=your_security_code

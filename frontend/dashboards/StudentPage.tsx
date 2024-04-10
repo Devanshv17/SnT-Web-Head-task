@@ -103,7 +103,7 @@ const StudentPage: React.FC<Props> = ({ username }) => {
 
             {/* Modal Dialog for requesting course */}
             {showRequestDialog && (
-                <div className="fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 bg-white p-8 rounded-2xl shadow-lg">
+                <div className="fixed text-black inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 bg-white p-8 rounded-2xl shadow-lg">
                     <div className="bg-white rounded-lg p-8 max-w-md w-full">
                         <h2 className="text-2xl font-bold mb-4">Request Course</h2>
                         <input
