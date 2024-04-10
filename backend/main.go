@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
@@ -25,6 +26,7 @@ import (
 var (
 	registeredUsers   *mongo.Collection
 	courseCollection  *mongo.Collection
+	requestCollection *mongo.Collection
 	ctx               = context.TODO()
 	jwtKey            = []byte("3J&59#sM%5D+^!Y$BXu@2pPw@sn#ZjF")
 	adminSecurityCode string
@@ -45,6 +47,13 @@ type UserRegistration struct {
 	OTP          string   `json:"otp"`
 	Courses      []string `json:"courses,omitempty"`
 	SecurityCode string   `json:"securityCode"`
+	Verified     []bool   `json:"verified,omitempty"`
+}
+
+type CourseUpdateRequest struct {
+	Username string `json:"username" binding:"required"`
+	Course   string `json:"course" binding:"required"`
+	Verified bool   `json:"verified"`
 }
 
 type Course struct {
@@ -75,7 +84,18 @@ func main() {
 	registerDB := client.Database("Userdata")
 	registeredUsers = registerDB.Collection("registered_users")
 
+	requestDB := client.Database("CourseUpdateRequest")
+	requestCollection = requestDB.Collection("course_requests")
+
 	r := gin.Default()
+
+	// Use CORS middleware with custom configuration
+	config := cors.DefaultConfig()
+	config.AllowOrigins = []string{"http://example.com", "http://localhost:3000"}
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE"}
+	config.AllowHeaders = append(config.AllowHeaders, "Authorization")
+
+	r.Use(cors.New(config))
 
 	r.POST("/api/login", login)
 	r.POST("/api/register", register)
@@ -86,7 +106,10 @@ func main() {
 	r.DELETE("/api/courses/:name", deleteCourse)
 	r.GET("/api/students/:username", getStudentDetails)
 	r.GET("/api/students/:username/courses", getStudentCourses)
+	r.DELETE("/api/students/:username/courses/:course", deleteCourseForStudent)
 	r.POST("/api/add-course", addCourseToStudent)
+	r.POST("/api/update-course-verification", updateCourseVerificationStatus)
+	r.GET("/api/requests", getCourseRequests)
 
 	if err := r.Run("0.0.0.0:8080"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
@@ -456,11 +479,136 @@ func getStudentDetails(c *gin.Context) {
 }
 
 func addCourseToStudent(c *gin.Context) {
-	type AddCourseRequest struct {
-		Username string `json:"username" binding:"required"`
-		Course   string `json:"course" binding:"required"`
+	var req CourseUpdateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
+	// Check if the provided student username exists
+	var student UserRegistration
+	err := registeredUsers.FindOne(ctx, bson.M{"username": req.Username}).Decode(&student)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Student not found"})
+		return
+	}
+
+	// Create a new request record for the course
+	_, err = requestCollection.InsertOne(ctx, bson.M{
+		"username": req.Username,
+		"course":   req.Course,
+		"verified": false, // Set verified status to false initially
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create course request"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Course request submitted for verification"})
+}
+
+// Route for admin to update course verification status
+func updateCourseVerificationStatus(c *gin.Context) {
+	// Check if the user is an admin
+	if !checkRole(c, "admin") {
+		return
+	}
+
+	var req CourseUpdateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if the provided request exists
+	var request CourseUpdateRequest
+	err := requestCollection.FindOne(ctx, bson.M{"username": req.Username, "course": req.Course}).Decode(&request)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Request not found"})
+		return
+	}
+
+	// Update the verification status of the request
+	update := bson.M{"$set": bson.M{"verified": req.Verified}}
+	_, err = requestCollection.UpdateOne(ctx, bson.M{"username": req.Username, "course": req.Course}, update)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update course verification status"})
+		return
+	}
+
+	if req.Verified {
+		// Add the course to the student's courses
+		studentUpdate := bson.M{"$push": bson.M{"courses": req.Course, "verified": req.Verified}}
+		_, err := registeredUsers.UpdateOne(ctx, bson.M{"username": req.Username}, studentUpdate)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update student courses"})
+			return
+		}
+
+		// Delete the request from the request collection
+		_, err = requestCollection.DeleteOne(ctx, bson.M{"username": req.Username, "course": req.Course})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete course request"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Course verification status updated successfully and added to student's courses"})
+	} else {
+		// If the request is denied, simply delete the request
+		_, err = requestCollection.DeleteOne(ctx, bson.M{"username": req.Username, "course": req.Course})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete course request"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Course verification status updated successfully"})
+	}
+}
+
+func deleteCourseForStudent(c *gin.Context) {
+	var req CourseUpdateRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if the provided student username exists
+	var student UserRegistration
+	err := registeredUsers.FindOne(ctx, bson.M{"username": req.Username}).Decode(&student)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Student not found"})
+		return
+	}
+
+	// Find the index of the course to delete
+	index := -1
+	for i, course := range student.Courses {
+		if course == req.Course {
+			index = i
+			break
+		}
+	}
+
+	// If course found, delete it
+	if index != -1 {
+		student.Courses = append(student.Courses[:index], student.Courses[index+1:]...)
+		student.Verified = append(student.Verified[:index], student.Verified[index+1:]...)
+
+		// Update the student's document in the database
+		update := bson.M{"$set": bson.M{"courses": student.Courses, "verified": student.Verified}}
+		_, err = registeredUsers.UpdateOne(ctx, bson.M{"username": req.Username}, update)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete course for student"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Course deleted for student successfully"})
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Student is not enrolled in the requested course"})
+	}
+}
+
+func getStudentCourses(c *gin.Context) {
 	// Extract JWT token from the request header
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
@@ -488,14 +636,8 @@ func addCourseToStudent(c *gin.Context) {
 	// Log the extracted username and role
 	fmt.Printf("Username: %s, Role: %s\n", claims.Username, claims.Role)
 
-	var req AddCourseRequest
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
 	// Get the requested username from the request parameters
-	requestedUsername := req.Username
+	requestedUsername := c.Param("username")
 
 	// Check if the user is authorized as an admin or if they are the correct user
 	if claims.Role != "admin" && claims.Role != "student" && claims.Username != requestedUsername {
@@ -503,50 +645,41 @@ func addCourseToStudent(c *gin.Context) {
 		return
 	}
 
-	if claims.Role == "student" && claims.Username != req.Username {
+	if claims.Role == "student" && claims.Username != requestedUsername {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized access to another student's data"})
 		return
 	}
 
-	// Check if the provided student username exists
-	var student UserRegistration
-	err = registeredUsers.FindOne(ctx, bson.M{"username": req.Username}).Decode(&student)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Student not found"})
-		return
-	}
-
-	// Add the course to the student's courses array
-	student.Courses = append(student.Courses, req.Course)
-
-	// Update the user's document in the database
-	update := bson.M{"$set": bson.M{"courses": student.Courses}}
-	_, err = registeredUsers.UpdateOne(ctx, bson.M{"username": req.Username}, update)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add course to student"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Course added to student successfully"})
-}
-
-func getStudentCourses(c *gin.Context) {
-	// Check if the user is an admin
-	if !checkRole(c, "admin") {
-		return
-	}
-
-	// Get student username from request parameters
-	username := c.Param("username")
-
 	// Query the database to retrieve details of the student by username
 	var student UserRegistration
-	err := registeredUsers.FindOne(ctx, bson.M{"username": username}).Decode(&student)
+	err = registeredUsers.FindOne(ctx, bson.M{"username": requestedUsername}).Decode(&student)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch student details"})
 		return
 	}
 
-	// Return the courses enrolled by the student
 	c.JSON(http.StatusOK, gin.H{"courses": student.Courses})
+}
+
+func getCourseRequests(c *gin.Context) {
+	// Check if the user is an admin
+	if !checkRole(c, "admin") {
+		return
+	}
+
+	// Query the database to retrieve course requests
+	cursor, err := requestCollection.Find(ctx, bson.M{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch course requests"})
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var requests []CourseUpdateRequest
+	if err := cursor.All(ctx, &requests); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode course requests"})
+		return
+	}
+
+	c.JSON(http.StatusOK, requests)
 }

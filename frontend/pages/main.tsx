@@ -4,42 +4,56 @@ import UploadForm from '../components/UploadForm';
 import ProfileSection from '../components/ProfileSection';
 import { useRouter } from 'next/router';
 
-interface UploadedFile {
+interface CourseUpdateRequest {
     _id: string;
-    courseName: string;
-    batch: string;
-    instructor: string;
-    type: string;
-    remark: string;
-    link: string;
+    username: string;
+    course: string;
+    verified: boolean;
 }
 
 const MainPage: React.FC = () => {
-    const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+    const [courses, setCourses] = useState<string[]>([]);
+    const [courseRequests, setCourseRequests] = useState<CourseUpdateRequest[]>([]);
     const [showUploadForm, setShowUploadForm] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [currentPage, setCurrentPage] = useState(1);
-    const [filteredFiles, setFilteredFiles] = useState<UploadedFile[]>([]); // Added state for filtered files
-    const [username, setUsername] = useState<string>(''); // Added state for username
-    const filesPerPage = 12;
+    const [showRequestDialog, setShowRequestDialog] = useState(false);
+    const [requestedCourse, setRequestedCourse] = useState('');
+    const [username, setUsername] = useState<string>('');
+    const [userRole, setUserRole] = useState<string>('');
+    const [selectedRequest, setSelectedRequest] = useState<CourseUpdateRequest | null>(null);
     const router = useRouter();
 
     useEffect(() => {
-        fetchUploadedFiles(); // Fetch files when the component mounts
-        setUsername(getUsernameFromToken()); // Set the username when the component mounts
+        setUsername(getUsernameFromToken());
+        setUserRole(getUserRoleFromToken());
     }, []);
 
-    const fetchUploadedFiles = async () => {
+    useEffect(() => {
+        if (username) {
+            fetchStudentCourses();
+        }
+    }, [username]);
+
+    useEffect(() => {
+        if (userRole === 'admin') {
+            fetchCourseRequests();
+        }
+    }, [userRole]);
+
+    const fetchStudentCourses = async () => {
         try {
-            const response = await axios.get<UploadedFile[]>('http://localhost:8080/api/fetch');
+            const token = localStorage.getItem('token');
+            const response = await axios.get<{ courses: string[] }>(`http://localhost:8080/api/students/${username}/courses`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
             if (response.status === 200) {
-                setUploadedFiles(response.data || []);
-                setFilteredFiles(response.data || []); // Initialize filteredFiles state with all files
+                setCourses(response.data.courses || []);
             } else {
-                console.error('Error fetching uploaded files:', response.statusText);
+                console.error('Error fetching student courses:', response.statusText);
             }
         } catch (error) {
-            console.error('Error fetching uploaded files:', error);
+            console.error('Error fetching student courses:', error);
         }
     };
 
@@ -52,136 +66,226 @@ const MainPage: React.FC = () => {
         return '';
     };
 
+    const getUserRoleFromToken = () => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+            return tokenPayload.role;
+        }
+        return '';
+    };
+
     const handleLogout = () => {
-        // Clear token from localStorage
         localStorage.removeItem('token');
-        // Redirect to login page
         router.push('/login');
     };
 
     const handleToggleForm = () => {
-        setShowUploadForm(!showUploadForm);
+        setShowUploadForm(prevState => !prevState);
     };
 
-    const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const query = e.target.value;
-        setSearchQuery(query);
-        setFilteredFiles(filterFiles(query, uploadedFiles));
-    };
-
-    const filterFiles = (query: string, files: UploadedFile[]) => {
-        return files.filter(file =>
-            file.courseName.toLowerCase().includes(query.toLowerCase()) ||
-            file.type.toLowerCase().includes(query.toLowerCase()) ||
-            file.instructor.toLowerCase().includes(query.toLowerCase()) ||
-            file.batch.toLowerCase().includes(query.toLowerCase()) ||
-            file.remark.toLowerCase().includes(query.toLowerCase())
-        );
-    };
-
-    // Add a function to check if the user is authenticated
     const isLoggedIn = () => {
         const token = localStorage.getItem('token');
-        return !!token; // Returns true if token is present, false otherwise
+        return !!token;
     };
 
-    // If the user is not logged in, redirect to the login page
-    useEffect(() => {
-        if (!isLoggedIn()) {
-            router.push('/login');
+    const fetchCourseRequests = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.get<CourseUpdateRequest[]>('http://localhost:8080/api/requests', {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            if (response.status === 200) {
+                setCourseRequests(response.data || []);
+            } else {
+                console.error('Error fetching course requests:', response.statusText);
+            }
+        } catch (error) {
+            console.error('Error fetching course requests:', error);
         }
-    }, []);
-
-    const indexOfLastFile = Math.min(currentPage * filesPerPage, filteredFiles.length);
-    const indexOfFirstFile = Math.min(indexOfLastFile - filesPerPage, filteredFiles.length);
-
-    const currentFiles = filteredFiles.slice(indexOfFirstFile, indexOfLastFile);
-
-    const maxPages = Math.ceil(filteredFiles.length / filesPerPage);
-
-    // Pagination handlers
-    const handlePageChange = (pageNumber: number) => {
-        setCurrentPage(pageNumber);
     };
 
-    // Main page UI
+    const handleApproveRequest = async (request: CourseUpdateRequest) => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.post(
+                'http://localhost:8080/api/update-course-verification',
+                { username: request.username, course: request.course, verified: true },
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+            if (response.status === 200) {
+                console.log('Course request approved successfully');
+                fetchCourseRequests();
+            } else {
+                console.error('Error approving course request:', response.data.error);
+            }
+        } catch (error) {
+            console.error('Error approving course request:', error);
+        }
+    };
+
+    const handleDenyRequest = async (request: CourseUpdateRequest) => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.post(
+                'http://localhost:8080/api/update-course-verification',
+                { username: request.username, course: request.course, verified: false },
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                    },
+                }
+            );
+            if (response.status === 200) {
+                console.log('Course request denied successfully');
+                fetchCourseRequests();
+            } else {
+                console.error('Error denying course request:', response.data.error);
+            }
+        } catch (error) {
+            console.error('Error denying course request:', error);
+        }
+    };
+
+    const handleRequestCourse = () => {
+        setShowRequestDialog(true);
+    };
+
+    const handleCloseDialog = () => {
+        setShowRequestDialog(false);
+    };
+
+    const handleRequestDialogSubmit = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await axios.post(`http://localhost:8080/api/add-course`, { username, course: requestedCourse }, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            if (response.status === 200) {
+                console.log('Course requested successfully');
+                setShowRequestDialog(false);
+                fetchStudentCourses();
+            } else {
+                console.error('Error requesting course:', response.statusText);
+            }
+        } catch (error) {
+            console.error('Error requesting course:', error);
+        }
+    };
+
+    const handleSelectRequest = (request: CourseUpdateRequest) => {
+        setSelectedRequest(request);
+    };
 
     return (
         <div className="container mx-auto mt-8 relative">
             <div className="flex justify-between items-center">
-            <h1 className="text-6xl py-4 font-bold text-center mb-4 flex-grow">EduWise</h1>
-            <div>
-                <ProfileSection username={username} handleLogout={handleLogout} />
-            </div>
+                <h1 className="text-6xl py-4 font-bold text-center mb-4 flex-grow">{userRole === 'admin' ? 'Admin Dashboard' : 'Student Dashboard'}</h1>
+                <div>
+                    <ProfileSection username={username} handleLogout={handleLogout} />
+                </div>
             </div>
 
             <div className="mb-8 text-right">
-                <input
-                    type="text"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={handleSearch}
-                    className="border my-4 text-black border-gray-300 rounded-full px-4 py-2 mx-auto block max-w-3xl w-full"
-                />
-
-                <button onClick={handleToggleForm} className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-300">
-                    {showUploadForm ? 'Close Form' : 'Upload Files'}
-                </button>
+                {userRole === 'admin' && (
+                    <button onClick={handleToggleForm} className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-300">
+                        {showUploadForm ? 'Close Form' : 'Upload Files'}
+                    </button>
+                )}
             </div>
 
-            {showUploadForm && (
+            {showUploadForm && userRole === 'admin' && (
                 <div className="fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 bg-white p-8 rounded-2xl shadow-lg">
-                    
-                    <UploadForm username={username} fetchUploadedFiles={fetchUploadedFiles} onClose={() => setShowUploadForm(false)} />
+                    <UploadForm username={username} fetchStudentCourses={fetchStudentCourses} onClose={() => setShowUploadForm(false)} />
                 </div>
             )}
 
-            <div className="grid gap-16 mt-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
-                {currentFiles.map((file, index) => (
-                    <a href={file.link} download key={index}>
-                        <div className="text-center mt-2 bg-gray-100 py-10 px-8 rounded-md shadow-md h-40 max-w-xs sm:max-w-full">
-                            <h2 className="text-base text-gray-700 font-semibold">{file.courseName}</h2>
-                            <p className="text-gray-500 text-xs">{file.type}</p>
-                            <p className="text-gray-500 text-xs">Instructor: {file.instructor}, Batch: {file.batch}</p>
-                            <p className="text-gray-500 text-xs">Remark: {file.remark}</p>
-                        </div>
-                    </a>
-                ))}
+            <div className="overflow-x-auto">
+                <table className="table-auto border-collapse border border-gray-400">
+                    <thead>
+                        <tr>
+                            <th className="border border-gray-400 px-4 py-2">Course Name</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {courses.map((course, index) => (
+                            <tr key={index}>
+                                <td className="border border-gray-400 px-4 py-2">{course}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
 
-            {/* Pagination */}
-            {filteredFiles.length > filesPerPage && (
-                <div className="flex justify-center mt-8">
-                    <button
-                        onClick={() => handlePageChange(currentPage - 1)}
-                        disabled={currentPage === 1}
-                        className="bg-gray-200 text-gray-800 font-semibold py-2 px-4 mx-1 rounded"
-                    >
-                        {"<<"}
+            {userRole === 'student' && (
+                <div className="text-center mt-4">
+                    <button onClick={handleRequestCourse} className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-300">
+                        Request Course
                     </button>
-                    {Array.from({ length: Math.min(maxPages, 10) }, (_, i) => {
-                        const pageNumber = currentPage + i - 5;
-                        return (
-                            pageNumber > 0 && pageNumber <= maxPages && (
-                                <button
-                                    key={i}
-                                    onClick={() => handlePageChange(pageNumber)}
-                                    className={`bg-gray-200 text-gray-800 font-semibold py-2 px-4 mx-1 rounded ${
-                                        currentPage === pageNumber ? 'bg-gray-400' : ''
-                                    }`}
-                                >
-                                    {pageNumber}
-                                </button>
-                            )
-                        );
-                    })}
-                    <button
-                        onClick={() => handlePageChange(currentPage + 1)}
-                        disabled={currentPage === maxPages}
-                        className="bg-gray-200 text-gray-800 font-semibold py-2 px-4 mx-1 rounded"
-                    >
-                        {">>"}
-                    </button>
+                </div>
+            )}
+
+            {/* Modal Dialog for requesting course */}
+            {showRequestDialog && (
+                <div className="fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 bg-white p-8 rounded-2xl shadow-lg">
+                    <div className="bg-white rounded-lg p-8 max-w-md w-full">
+                        <h2 className="text-2xl font-bold mb-4">Request Course</h2>
+                        <input
+                            type="text"
+                            className="border border-gray-300 rounded-md p-2 w-full mb-4"
+                            placeholder="Enter course name"
+                            value={requestedCourse}
+                            onChange={(e) => setRequestedCourse(e.target.value)}
+                        />
+                        <div className="flex justify-end">
+                            <button onClick={handleCloseDialog} className="mr-2 bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600 transition duration-300">
+                                Cancel
+                            </button>
+                            <button onClick={handleRequestDialogSubmit} className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-300">
+                                Request
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Course Requests for Admin */}
+            {userRole === 'admin' && (
+                <div className="mt-8">
+                    <h2 className="text-2xl font-bold mb-4">Course Requests</h2>
+                    <ul>
+                        {courseRequests.map((request, index) => (
+                            <li key={index} className="mb-4">
+                                <div>
+                                    <span>Username: {request.username}</span>
+                                    <br />
+                                    <span>Course: {request.course}</span>
+                                    <br />
+                                    <span>Status: {request.verified ? 'Approved' : 'Pending'}</span>
+                                </div>
+                                <div className="mt-2">
+                                    {!request.verified && (
+                                        <>
+                                            <button onClick={() => handleApproveRequest(request)} className="bg-green-500 text-white py-2 px-4 rounded-md hover:bg-green-600 transition duration-300 mr-2">
+                                                Approve
+                                            </button>
+                                            <button onClick={() => handleDenyRequest(request)} className="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 transition duration-300">
+                                                Deny
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
                 </div>
             )}
         </div>

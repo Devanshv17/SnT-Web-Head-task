@@ -5,12 +5,12 @@ import NewInstructorPopup from './NewInstructor';
 import NewCoursePopup from './NewCourse'; // Import the NewCoursePopup component
 
 interface UploadFormProps {
-    fetchUploadedFiles: () => void;
+    fetchStudentCourses: () => void;
     onClose: () => void; // Function to close the form
     username: string; // Add username prop
 }
 
-const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose, username }) => {
+const UploadForm: React.FC<UploadFormProps> = ({ fetchStudentCourses, onClose, username }) => {
     const [courseName, setCourseName] = useState('');
     const [batch, setBatch] = useState('');
     const [instructor, setInstructor] = useState<string | null>(null);
@@ -143,7 +143,7 @@ const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose, us
                 },
             });
             alert('Upload successful!');
-            fetchUploadedFiles();
+            fetchStudentCourses();
         } catch (error) {
             alert('Error uploading data');
             console.error(error);

@@ -8,21 +8,23 @@ const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [role, setRole] = useState('student'); // Default role is student
+  const [securityCode, setSecurityCode] = useState('');
   const router = useRouter();
 
   const handleRegister = async () => {
     setLoading(true);
     setError(null);
-  
+
     try {
       const response = await fetch('http://localhost:8080/api/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ username: username + '@iitk.ac.in', password }),
+        body: JSON.stringify({ username: username + '@iitk.ac.in', password, role, securityCode }),
       });
-  
+
       if (response.ok) {
         setIsRegistering(true); // Show OTP field after successful registration
         alert('OTP sent successfully'); // Set success message
@@ -34,14 +36,14 @@ const LoginPage: React.FC = () => {
     } catch (error) {
       setError('An error occurred. Please try again.');
     }
-  
+
     setLoading(false);
   };
 
   const handleVerifyOTP = async () => {
     setLoading(true);
     setError(null);
-  
+
     try {
       const response = await fetch('http://localhost:8080/api/verify', {
         method: 'POST',
@@ -50,7 +52,7 @@ const LoginPage: React.FC = () => {
         },
         body: JSON.stringify({ username: username + '@iitk.ac.in', otp }),
       });
-  
+
       if (response.ok) {
         alert('OTP verified successfully'); // Set success message
         router.push('/login'); // Redirect to login page after OTP verification
@@ -61,15 +63,14 @@ const LoginPage: React.FC = () => {
     } catch (error) {
       setError('An error occurred. Please try again.');
     }
-  
+
     setLoading(false);
   };
-  
 
   const handleLogin = async () => {
     setLoading(true);
     setError(null);
-  
+
     try {
       const response = await fetch('http://localhost:8080/api/login', {
         method: 'POST',
@@ -78,7 +79,7 @@ const LoginPage: React.FC = () => {
         },
         body: JSON.stringify({ username: username + '@iitk.ac.in', password }),
       });
-  
+
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem('token', data.token); // Set JWT token in localStorage
@@ -90,7 +91,7 @@ const LoginPage: React.FC = () => {
     } catch (error) {
       setError('An error occurred. Please try again.');
     }
-  
+
     setLoading(false);
   };
 
@@ -103,7 +104,7 @@ const LoginPage: React.FC = () => {
           <div className="mb-2">
             <input
               type="text"
-              placeholder="Roll Number "
+              placeholder="Roll Number"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="border text-black rounded-md px-4 py-2 w-72"
@@ -118,6 +119,26 @@ const LoginPage: React.FC = () => {
               className="border text-black rounded-md px-4 py-2 w-72"
             />
           </div>
+          {isRegistering && (
+            <div className="mb-2">
+              <label htmlFor="role">Select Role:</label>
+              <select id="role" value={role} onChange={(e) => setRole(e.target.value)} className="border text-black rounded-md px-2 py-1 ml-2">
+                <option value="student">Student</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          )}
+          {role === 'admin' && isRegistering && (
+            <div className="mb-2">
+              <input
+                type="text"
+                placeholder="Security Code"
+                value={securityCode}
+                onChange={(e) => setSecurityCode(e.target.value)}
+                className="border text-black rounded-md px-4 py-2 w-72"
+              />
+            </div>
+          )}
           {!isRegistering && (
             <div className="mb-2">
               <button onClick={handleLogin} disabled={loading} className="bg-blue-500 text-white px-4 py-2 rounded-md">
