@@ -13,7 +13,7 @@ touch .env
 Or directly add environment variables in .env with the following details:
 plaintext
 Copy code
-MONGO_URI=<Your Mongo Deatails>
+MONGO_URI=<"Your Mongo Details">
 SMTP_USERNAME=your_smtp_username
 SMTP_PASSWORD=your_smtp_password
 SECURITY_CODE=your_security_code
